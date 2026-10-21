@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Microwave Controls</title>
+<style>
+  :root {
+    --bg: #0d0d0d;
+    --panel: #111;
+    --line: #e8e8e8;
+    --text: #f2f2f2;
+    --muted: #8a8a8a;
+    --press: #2a2a2a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+  }
+
+  .panel {
+    display: flex;
+    align-items: stretch;
+    gap: 18px;
+    padding: 38px 18px 18px;
+    background: var(--panel);
+    border-radius: 18px;
+    box-shadow: 0 0 0 1px #222, 0 20px 50px rgba(0,0,0,.6);
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  button {
+    font: inherit;
+    color: var(--text);
+    background: transparent;
+    border: 1.5px solid var(--line);
+    border-radius: 10px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: background .08s, transform .08s, color .08s;
+  }
+  button:hover { background: #1b1b1b; }
+  button:active { background: var(--press); transform: scale(.96); }
+  button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+  /* Display */
+  .display {
+    width: 260px;
+    border: 1.5px solid var(--line);
+    border-radius: 26px;
+    background: #050505;
+    position: relative;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+  /* Seven-segment readout; all sizes are in em so font-size scales the digits */
+  .readout {
+    display: flex;
+    align-items: center;
+    font-size: 40px;
+    color: var(--muted);
+    transform: skewX(-6deg);
+    transition: color .2s, font-size .2s, filter .2s;
+  }
+  .display.running .readout,
+  .display.done .readout {
+    font-size: 60px;
+    color: #fff;
+    filter: drop-shadow(0 0 6px rgba(255,255,255,.35));
+  }
+  .display.done .readout { animation: blink .5s steps(1) 6; }
+
+  .digit { position: relative; width: .56em; height: 1em; margin: 0 .06em; }
+  .seg { position: absolute; background: currentColor; opacity: .07; }
+  .seg.on { opacity: 1; }
+  .seg.a, .seg.g, .seg.d {
+    left: .065em; right: .065em; height: .1em;
+    clip-path: polygon(0 50%, .05em 0, calc(100% - .05em) 0, 100% 50%, calc(100% - .05em) 100%, .05em 100%);
+  }
+  .seg.a { top: 0; }
+  .seg.g { top: .45em; }
+  .seg.d { bottom: 0; }
+  .seg.b, .seg.c, .seg.e, .seg.f {
+    width: .1em; height: calc(50% - .13em);
+    clip-path: polygon(50% 0, 100% .05em, 100% calc(100% - .05em), 50% 100%, 0 calc(100% - .05em), 0 .05em);
+  }
+  .seg.f { left: 0; top: .065em; }
+  .seg.b { right: 0; top: .065em; }
+  .seg.e { left: 0; bottom: .065em; }
+  .seg.c { right: 0; bottom: .065em; }
+
+  .colon { position: relative; width: .18em; height: 1em; }
+  .colon::before, .colon::after {
+    content: "";
+    position: absolute;
+    left: .04em;
+    width: .1em;
+    height: .1em;
+    background: currentColor;
+  }
+  .colon::before { top: .28em; }
+  .colon::after { top: .64em; }
+
+  .notice {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 16px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text);
+    opacity: 0;
+    transition: opacity .2s;
+  }
+  .notice.show { opacity: 1; }
+  .screen-label {
+    position: absolute;
+    top: 16px;
+    left: 22px;
+    font-size: 13px;
+    color: var(--text);
+    display: none;
+  }
+  .display.running .cooking { display: block; }
+
+  /* Set-time screen: the keypad mirrors the physical button layout and is not clickable */
+  .setclock { display: none; }
+  .display.setting .setclock { display: block; }
+  .display.setting .set-label { display: block; }
+  .display.setting .readout,
+  .display.setting .notice { display: none; }
+  .entry {
+    position: absolute;
+    top: 42px;
+    left: 26px;
+    font-size: 18px;
+    letter-spacing: 1px;
+    font-variant-numeric: tabular-nums;
+  }
+  .keypad {
+    position: absolute;
+    top: 36px;
+    right: 18px;
+    display: grid;
+    grid-template-columns: repeat(4, 34px);
+    grid-auto-rows: 44px;
+    place-items: center;
+    font-size: 18px;
+    pointer-events: none;
+    user-select: none;
+  }
+  .key {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    transition: background .15s, color .15s;
+  }
+  .key.hit { background: var(--text); color: #000; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Function column */
+  .funcs { display: grid; grid-template-rows: repeat(3, 1fr); gap: 8px; width: 96px; }
+  .funcs button { font-size: 15px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+  .funcs .small { font-size: 12px; }
+  .funcs sub { font-size: 9px; color: var(--muted); letter-spacing: .3px; }
+
+  /* Labeled groups (label sits above, in the panel's top padding) */
+  .group { position: relative; display: flex; flex-direction: column; }
+  .group > :last-child { flex: 1; }
+  .group-label {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    margin-bottom: 7px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* Timer grid */
+  .times {
+    display: grid;
+    grid-template-columns: repeat(3, 72px);
+    grid-auto-rows: 64px;
+    gap: 6px;
+  }
+  .times button { font-size: 18px; }
+
+  /* Power column */
+  .power { display: grid; grid-template-rows: repeat(4, 1fr); gap: 6px; width: 54px; }
+  .power button { font-size: 14px; }
+  .power button[aria-checked="true"] {
+    background: var(--text);
+    color: #000;
+    font-weight: 600;
+  }
+
+  .hint {
+    margin-top: 18px;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+    max-width: 640px;
+    line-height: 1.5;
+  }
+  .wrap { display: flex; flex-direction: column; align-items: center; max-width: 100%; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <div class="display" id="display" aria-live="polite">
+      <div class="screen-label cooking">Cooking:</div>
+      <div class="screen-label set-label">Set Time:</div>
+      <div class="readout" id="readout"></div>
+      <div class="notice" id="notice">Power cannot be changed while cooking.</div>
+      <div class="setclock">
+        <div class="entry" id="entry">_:__</div>
+        <div class="keypad" id="keypad" aria-hidden="true">
+          <span></span><span class="key">1</span><span class="key">2</span><span class="key">3</span>
+          <span class="key">0</span><span class="key">4</span><span class="key">5</span><span class="key">6</span>
+          <span></span><span class="key">7</span><span class="key">8</span><span class="key">9</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="funcs">
+      <button id="cancel">Cancel</button>
+      <button id="turntable" aria-pressed="true">Turntable<sub><span id="ttOn">on</span>/<span id="ttOff">off</span></sub></button>
+      <button id="clock" class="small">Clock Tools</button>
+    </div>
+
+    <div class="group">
+    <div class="group-label">Time</div>
+    <div class="times" id="times">
+      <button data-sec="5">5</button>
+      <button data-sec="10">10</button>
+      <button data-sec="15">15</button>
+      <button data-sec="20">20</button>
+      <button data-sec="30">30</button>
+      <button data-sec="45">45</button>
+      <button data-sec="60">60</button>
+      <button data-sec="90">90</button>
+      <button data-sec="120">120</button>
+    </div>
+    </div>
+
+    <div class="group">
+    <div class="group-label">Power</div>
+    <div class="power" id="power" role="radiogroup" aria-label="Power level">
+      <button role="radio" data-power="100" aria-checked="true">100</button>
+      <button role="radio" data-power="75" aria-checked="false">75</button>
+      <button role="radio" data-power="50" aria-checked="false">50</button>
+      <button role="radio" data-power="25" aria-checked="false">25</button>
+    </div>
+    </div>
+  </div>
+  <p class="hint">
+  	This is my opinion on the optimal microwave controls.
+    Tap a time to start cooking right away; tapping more times adds to what's left.
+    Power is on the right. Clock Tools sets the clock: the buttons type the digits shown on screen, and Clock Tools again saves.
+  </p>
+</div>
+
+<script>
+  const display = document.getElementById('display');
+  const readout = document.getElementById('readout');
+  const notice = document.getElementById('notice');
+  const entry = document.getElementById('entry');
+  const ttBtn = document.getElementById('turntable');
+  const ttOn = document.getElementById('ttOn');
+  const ttOff = document.getElementById('ttOff');
+
+  const state = {
+    endAt: null,       // timestamp (ms) when cooking finishes; null when idle
+    power: 100,
+    turntable: true,
+    clockOffset: 0,    // ms added to computer time; changed by setting the clock
+    setting: null,     // digits typed so far while setting the clock; null otherwise
+    doneUntil: 0,      // show "End" until this timestamp
+    noticeUntil: 0,    // show the power notice until this timestamp
+  };
+
+  function clockNow() {
+    return new Date(Date.now() + state.clockOffset);
+  }
+
+  // --- Audio --------------------------------------------------------------
+  let audio;
+  function beep(freq = 1800, dur = 0.06, when = 0) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const t = audio.currentTime + when;
+      const osc = audio.createOscillator();
+      const gain = audio.createGain();
+      osc.type = 'square';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.06, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(gain).connect(audio.destination);
+      osc.start(t);
+      osc.stop(t + dur);
+    } catch (e) { /* audio unavailable */ }
+  }
+
+  // --- Controls -----------------------------------------------------------
+  document.getElementById('times').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-sec]');
+    if (!btn) return;
+    if (state.setting !== null) {
+      // In set-time mode the 3x3 grid types 1–9, matching the on-screen keypad.
+      typeDigit([...btn.parentElement.children].indexOf(btn) + 1);
+      return;
+    }
+    const ms = Number(btn.dataset.sec) * 1000;
+    const now = Date.now();
+    state.endAt = (state.endAt && state.endAt > now ? state.endAt : now) + ms;
+    state.doneUntil = 0;
+    beep();
+    render();
+  });
+
+  document.getElementById('power').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-power]');
+    if (!btn) return;
+    const power = Number(btn.dataset.power);
+    if (state.endAt) {
+      if (power !== state.power) {
+        state.noticeUntil = Date.now() + 2500;
+        beep(400, 0.15);
+        render();
+      }
+      return;
+    }
+    state.power = power;
+    beep();
+    render();
+  });
+
+  document.getElementById('cancel').addEventListener('click', () => {
+    state.endAt = null;
+    state.doneUntil = 0;
+    state.noticeUntil = 0;
+    state.setting = null;
+    state.power = 100;
+    beep(900, 0.08);
+    render();
+  });
+
+  ttBtn.addEventListener('click', () => {
+    if (state.setting !== null) {
+      typeDigit(0); // Turntable sits where 0 is on the on-screen keypad
+      return;
+    }
+    state.turntable = !state.turntable;
+    beep();
+    render();
+  });
+
+  document.getElementById('clock').addEventListener('click', () => {
+    if (state.endAt) {
+      beep(400, 0.15);
+      return;
+    }
+    if (state.setting === null) {
+      state.setting = '';
+      state.doneUntil = 0;
+      beep();
+      render();
+    } else {
+      saveClock();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (state.setting === null) return;
+    if (/^[0-9]$/.test(e.key)) typeDigit(Number(e.key));
+    else if (e.key === 'Enter') { e.preventDefault(); saveClock(); }
+    else if (e.key === 'Backspace') { state.setting = state.setting.slice(0, -1); render(); }
+    else if (e.key === 'Escape') document.getElementById('cancel').click();
+  });
+
+  // --- Clock setting ------------------------------------------------------
+  function typeDigit(n) {
+    if (state.setting.length >= 4) return;
+    state.setting += n;
+    beep();
+    const key = [...document.querySelectorAll('#keypad .key')].find((k) => k.textContent === String(n));
+    key.classList.add('hit');
+    setTimeout(() => key.classList.remove('hit'), 180);
+    if (state.setting.length === 4) saveClock();
+    else render();
+  }
+
+  // Digits fill in from the right: "_:_1" → "_:12" → "1:23" → "12:34".
+  function fmtEntry(digits) {
+    if (digits.length === 4) return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+    const padded = ('___' + digits).slice(-3);
+    return `${padded[0]}:${padded.slice(1)}`;
+  }
+
+  function saveClock() {
+    const digits = state.setting;
+    const h = Number(digits.slice(0, -2));
+    const m = Number(digits.slice(-2));
+    // Hour 0 is accepted and shows as 12.
+    if (digits.length < 3 || m > 59 || h > 12) {
+      state.setting = '';
+      beep(400, 0.15);
+      render();
+      return;
+    }
+    // The clock is 12-hour only, so there's no AM/PM; it rolls over after 12:59.
+    const cur = clockNow();
+    const target = new Date(cur);
+    target.setHours(h % 12, m, 0, 0);
+    state.clockOffset += target - cur;
+    state.setting = null;
+    [0, 0.12].forEach((t) => beep(1800, 0.06, t));
+    render();
+  }
+
+  // --- Rendering ----------------------------------------------------------
+  function fmtTimer(totalSec) {
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  function fmtClock(d) {
+    const h = d.getHours() % 12 || 12;
+    const m = String(d.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  }
+
+  // Lit segments for each character the readout can show.
+  const SEGMENTS = {
+    '0': 'abcdef', '1': 'bc', '2': 'abged', '3': 'abgcd', '4': 'fgbc',
+    '5': 'afgcd', '6': 'afgedc', '7': 'abc', '8': 'abcdefg', '9': 'abcdfg',
+    'E': 'adefg', 'n': 'ceg', 'd': 'bcdeg',
+  };
+
+  let shown = null;
+  function setReadout(str) {
+    if (str === shown) return;
+    shown = str;
+    readout.innerHTML = [...str].map((ch) => {
+      if (ch === ':') return '<div class="colon"></div>';
+      const lit = SEGMENTS[ch] || '';
+      const segs = [...'abcdefg']
+        .map((s) => `<div class="seg ${s}${lit.includes(s) ? ' on' : ''}"></div>`)
+        .join('');
+      return `<div class="digit">${segs}</div>`;
+    }).join('');
+    readout.setAttribute('aria-label', str);
+  }
+
+  function finish() {
+    state.endAt = null;
+    state.noticeUntil = 0;
+    state.doneUntil = Date.now() + 3000;
+    [0, 0.25, 0.5].forEach((t) => beep(2000, 0.15, t));
+  }
+
+  function render() {
+    const now = Date.now();
+
+    if (state.endAt && now >= state.endAt) finish();
+
+    const running = !!state.endAt;
+    const done = !running && now < state.doneUntil;
+
+    display.classList.toggle('running', running);
+    display.classList.toggle('done', done);
+    display.classList.toggle('setting', state.setting !== null);
+
+    if (state.setting !== null) entry.textContent = fmtEntry(state.setting);
+
+    if (running) {
+      setReadout(fmtTimer(Math.ceil((state.endAt - now) / 1000)));
+    } else if (done) {
+      setReadout('End');
+    } else {
+      setReadout(fmtClock(clockNow()));
+    }
+
+    notice.classList.toggle('show', running && now < state.noticeUntil);
+
+    document.querySelectorAll('#power button').forEach((b) => {
+      b.setAttribute('aria-checked', String(Number(b.dataset.power) === state.power));
+    });
+
+    ttBtn.setAttribute('aria-pressed', String(state.turntable));
+    ttOn.style.fontWeight = state.turntable ? '600' : '400';
+    ttOn.style.color = state.turntable ? 'var(--text)' : 'var(--muted)';
+    ttOff.style.fontWeight = state.turntable ? '400' : '600';
+    ttOff.style.color = state.turntable ? 'var(--muted)' : 'var(--text)';
+  }
+
+  render();
+  setInterval(render, 100);
+</script>
+</body>
+</html>
